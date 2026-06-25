@@ -30,15 +30,21 @@ Timings (`sleepDelay`, `powerDelay`, `espLCDSleep`) are constants near the top o
 
 ## Configuration
 
-Before flashing, fill in the placeholders at the top of `OledAutoSleep.ino`:
+Credentials live in `config_secrets.h`, which is **gitignored**. Copy the template
+and fill in your values before flashing:
 
-| Constant                | Description                                              |
-| ----------------------- | ------------------------------------------------------- |
-| `ssid` / `password`     | Your WiFi credentials                                   |
-| `webosControllerUrl`    | Base URL of your `webosapitool` instance (HTTPS)        |
-| `webosControllerDevice` | Entity name configured in `webosapitool`                |
-| `webosControllerToken`  | Auth UUID that matches the entity's `auth` in the backend |
-| OTA password            | `ArduinoOTA.setPassword(...)` in `setup()`              |
+```sh
+cp config_secrets.example.h config_secrets.h
+# then edit config_secrets.h
+```
+
+| Macro                     | Description                                               |
+| ------------------------- | -------------------------------------------------------- |
+| `WIFI_SSID` / `WIFI_PASSWORD` | Your WiFi credentials                                |
+| `WEBOS_CONTROLLER_URL`    | Base URL of your `webosapitool` instance (HTTPS)         |
+| `WEBOS_CONTROLLER_DEVICE` | Entity name configured in `webosapitool`                 |
+| `WEBOS_CONTROLLER_TOKEN`  | Auth UUID that matches the entity's `auth` in the backend |
+| `OTA_PASSWORD`            | Password for over-the-air updates                        |
 
 The TV requests are sent as `POST {url}{device}/{action}` with an
 `Authorization: Bearer <token>` header over TLS.

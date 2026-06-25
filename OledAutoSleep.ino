@@ -7,16 +7,17 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include "time.h"
+#include "config_secrets.h" // WiFi / OTA / backend credentials (gitignored)
 
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
 const int motionPin1 = 13;
 const int motionPin2 = 15; //Not Used
 const int screenRotation = 3;
 
-String webosControllerUrl = "https://your-webos-controller.example.com/";
-String webosControllerDevice = "YOUR_TV_DEVICE_ID";
-String webosControllerToken = "YOUR_AUTH_UUID";
+String webosControllerUrl = WEBOS_CONTROLLER_URL;
+String webosControllerDevice = WEBOS_CONTROLLER_DEVICE;
+String webosControllerToken = WEBOS_CONTROLLER_TOKEN;
 
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 3 * 60 * 60; // GMT+3
@@ -30,13 +31,31 @@ unsigned long firstDetectionTime; //The first timestamp when motion is detected 
 unsigned long sleepDelay = 5000; //Delay before OLED TV screensaver (ms)
 unsigned long powerDelay = sleepDelay + 3600000; //Delay before power off OLED TV (ms)
 unsigned long espLCDSleep = 15000; //Delay before turning off LCD on ESP sensor when motion is first detected (ms)
-int state = 0; // 0 Initialization | 1 Motion Detected (LCD On) | 2 Motion Detected (LCD Off) | 3 No Motion | 4 Screensaver On | 5 Power Off
+
+// Current stage of the motion/power state machine.
+enum State {
+  INIT,           // Initialization
+  MOTION_LCD_ON,  // Motion detected, ESP LCD on
+  MOTION_LCD_OFF, // Motion detected, ESP LCD off
+  NO_MOTION,      // No motion, counting down to screensaver
+  SCREENSAVER,    // Screensaver on (TV screen off)
+  POWER_OFF       // Power off (TV shutting down)
+};
+
+// TV command sent to the backend (passed to rest_api_action).
+enum TvAction {
+  SCREEN_ON,    // turn TV screen on
+  SCREEN_OFF,   // turn TV screen off
+  TV_POWER_OFF  // power off TV
+};
+
+State state = INIT;
 volatile int motionState1;
 volatile int motionState2;
 
 boolean detectMotion = true; //Motion is detected (PIR or mmWave)
 
-//action | 0 Screen ON | 1 Screen OFF | 2 Power
+// Sends a TV command to the backend. `action` is a TvAction value.
 void rest_api_action(int action)
 {
     WiFiClientSecure client;
@@ -56,15 +75,15 @@ void rest_api_action(int action)
     }
 
     switch (action) {
-        case 0: // Screen On
+        case SCREEN_ON:
           Serial.println("Sending Screen ON Request");
           endpoint = "turn_on_screen";
           break;
-        case 1: // Screen Off
+        case SCREEN_OFF:
           Serial.println("Sending Screen OFF Request");
           endpoint = "turn_off_screen";
           break;
-        case 2: // Power
+        case TV_POWER_OFF:
           Serial.println("Sending Power Off Request");
           endpoint = "power_off";
           break;
@@ -127,7 +146,7 @@ void setup()
 
     // Enable Arduino OTA updates
     ArduinoOTA.setHostname("oledautosleep-esp32");
-    ArduinoOTA.setPassword("YOUR_OTA_PASSWORD");
+    ArduinoOTA.setPassword(OTA_PASSWORD);
     ArduinoOTA
     .onStart([]() {
       String type;
@@ -183,36 +202,34 @@ void loop()
 
     if (!detectMotion && (millis() - lastMotion >= powerDelay)) {
       Serial.println("Time to power off the TV");
-      state = 5;
+      state = POWER_OFF;
       draw_screen();
-      rest_api_action(2);
+      rest_api_action(TV_POWER_OFF);
       delay(10*60*1000); //Wait 10 minutes for power off, if still not off try again. This assumes the ESP is connected to the OLED TV USB power source, such that it cuts power when the TV is Off.
-       
+
     } else if (!detectMotion && (millis() - lastMotion >= sleepDelay)) {
-      if (state != 4) {
+      if (state != SCREENSAVER) {
         Serial.println("Turning Screensaver On");
-        state = 4;
-        rest_api_action(1);
+        state = SCREENSAVER;
+        rest_api_action(SCREEN_OFF);
       }
       draw_screen();
 
     } else {
       if (detectMotion) {
-        if (state != 1 && state != 2) { //Not already in a motion detected state
+        if (state != MOTION_LCD_ON && state != MOTION_LCD_OFF) { //Not already in a motion detected state
           Serial.println("Motion Detected");
-          state = 1; 
+          state = MOTION_LCD_ON;
           firstDetectionTime = millis();
-          rest_api_action(0);
+          rest_api_action(SCREEN_ON);
         }
-        if (state == 1 && (millis() - firstDetectionTime >= espLCDSleep)) { 
-          state = 2;
+        if (state == MOTION_LCD_ON && (millis() - firstDetectionTime >= espLCDSleep)) {
+          state = MOTION_LCD_OFF;
         }
         draw_screen();
 
       } else { //No longer detecting motion but it hasn't been long enough to go to Screensaver or Power Off State.
-        if (state == 2) { 
-        }
-        state = 3;
+        state = NO_MOTION;
         draw_screen();
       }
     }
@@ -226,14 +243,14 @@ void draw_screen() {
   img.setTextSize(2);
 
   switch (state) {
-    case 0:
+    case INIT:
       break;
-    case 1:
+    case MOTION_LCD_ON:
       draw_border(TFT_GREEN);
       img.setTextDatum(MC_DATUM);
       img.drawString("Motion Detected", 240/2, 135/2);
       break;
-    case 2: //LCD Screensaver while actively on OLED TV
+    case MOTION_LCD_OFF: //LCD Screensaver while actively on OLED TV
       struct tm timeinfo;
       if(!getLocalTime(&timeinfo)){
         Serial.println("Failed to obtain time");
@@ -249,7 +266,7 @@ void draw_screen() {
       img.setCursor(15,75);
       img.println(&timeinfo, "%H:%M");
       break;
-    case 3:
+    case NO_MOTION:
       draw_border(TFT_YELLOW);
       img.setCursor(15,10);
       img.println("No Motion");
@@ -259,7 +276,7 @@ void draw_screen() {
       img.setCursor(15,75);
       img.println((lastMotion + sleepDelay - millis())/1000 + 1);
       break;
-    case 4:
+    case SCREENSAVER:
       draw_border(TFT_RED);
       img.setCursor(15,10);
       img.println("Screensaver On");
@@ -269,7 +286,7 @@ void draw_screen() {
       img.setTextSize(3);
       img.println((lastMotion + powerDelay - millis())/1000 + 1);
       break;
-    case 5:
+    case POWER_OFF:
       draw_border(TFT_VIOLET);
       img.setTextDatum(MC_DATUM);
       img.drawString("Shutting Down TV", 240/2, 135/2);

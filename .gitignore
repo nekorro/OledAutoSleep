@@ -1,3 +1,6 @@
+# Real credentials — copy config_secrets.example.h to config_secrets.h and fill in
+config_secrets.h
+
 # Stale local copy — contains private credentials, not for publishing
 my/
 
