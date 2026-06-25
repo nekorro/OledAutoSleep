@@ -58,8 +58,19 @@ boolean detectMotion = true; //Motion is detected (PIR or mmWave)
 // Sends a TV command to the backend. `action` is a TvAction value.
 void rest_api_action(int action)
 {
-    WiFiClientSecure client;
-    client.setInsecure(); // Encrypt traffic but skip TLS certificate validation
+    // Pick the client based on the URL scheme so both http:// and https:// work.
+    // WiFiClientSecure inherits from WiFiClient (connect() is virtual), so HTTPClient
+    // performs the TLS handshake only when the underlying object is the secure one.
+    WiFiClient plainClient;
+    WiFiClientSecure secureClient;
+    WiFiClient* client;
+    if (webosControllerUrl.startsWith("https")) {
+      secureClient.setInsecure(); // Encrypt traffic but skip TLS certificate validation
+      client = &secureClient;
+    } else {
+      client = &plainClient;
+    }
+
     HTTPClient http;
     int httpResponseCode;
     String url;
@@ -90,7 +101,7 @@ void rest_api_action(int action)
     }
 
     url = webosControllerUrl + webosControllerDevice + "/" + endpoint;
-    http.begin(client, url);
+    http.begin(*client, url);
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Authorization", "Bearer " + webosControllerToken);
     httpResponseCode = http.POST("");
