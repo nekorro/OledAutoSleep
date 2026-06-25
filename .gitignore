@@ -1,0 +1,9 @@
+# Stale local copy — contains private credentials, not for publishing
+my/
+
+# Build artifacts
+build/
+*.bin
+*.elf
+*.map
+*.hex
